@@ -23,7 +23,7 @@ if __name__ == "__main__":
 #    DOR=extract_plain_text(search_page_by_title("Definition of Ready (DoR)"))
 #    print(DOR)
     while True:
-        wait=60
+        wait=600
         print("\n=== TEST CASE REFINEMENT ===")
         wait=check_and_print(summarize_test_case_refinement_tasks(),wait)
         print("Sleeping for", wait, "seconds")
