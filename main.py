@@ -27,4 +27,4 @@ if __name__ == "__main__":
         print("\n=== TEST CASE REFINEMENT ===")
         wait=check_and_print(summarize_test_case_refinement_tasks(),wait)
         print("Sleeping for", wait, "seconds")
-#        time.sleep(wait)
+        time.sleep(wait)
