@@ -1,6 +1,8 @@
-from agent_core.jira_client import get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id
+from agent_core.jira_client import get_field_last_update, get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id,get_comments_after, transition_issue, post_comment_to_jira 
 from agent_core.llm_selector import generate
+import base64
 import os
+
 def extract_text_from_adf(adf):
     if not isinstance(adf, dict):
         return ""
@@ -43,6 +45,12 @@ def extract_text_from_adf(adf):
 
     return extract_node_text(adf).strip()
 
+def has_already_commented(comments, tag):
+    for c in comments:
+        if extract_text_from_adf(c['body']).startswith(tag):
+##            print(f"\nAlready commented with tag '{tag}':\n {extract_text_from_adf(c['body'])}\n\n")
+            return True
+ 
 def load_feature_files_as_examples(folder_path: str) -> str:
     examples = []
     for filename in os.listdir(folder_path):
@@ -59,38 +67,68 @@ def summarize_ready_for_qa_tasks(user_email: str = None):
 
 def summarize_test_case_refinement_tasks(user_email: str = None):
     feature_examples = load_feature_files_as_examples("features/")
+#    issues = get_issues_by_status("REFINEMENT", assignee=user_email)
     issues = get_issues_by_status("TEST CASE REFINEMENT", assignee=user_email)
-    prompt = f"""You are a QA. You need to report critical things to BA and SA.\nFor each issue, check it make sense, no errors, and it's really understandable. Make the response as short as you can.
-After that write Test Cases in gherkins, use this as example:
-{feature_examples}
-Add @JREQ-<issue_key> to each test case, where <issue_key> is the key of the issue you are working on.
-List of issues:
-
-"""
-    return _summarize_issues(issues, prompt)
+#    issues = get_issues_by_status("REQUIREMENTS REVIEW", assignee=user_email)
+    for issue in issues:
 
 
-def _summarize_issues(issues: list, prompt_intro: str) -> str:
+        last_description_change = get_field_last_update(issue["key"], "description")
+        last_ac_change = get_field_last_update(issue["key"], "Acceptance Criteria")
+        last_updated = max(last_description_change, last_ac_change) if last_description_change and last_ac_change else None
+        comments = get_comments_after(issue["key"],after_date=last_updated)
+        
+        if not has_already_commented(comments, os.getenv('TEST_CASE_REFINEMENT_TAG')):
+            prompt = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_PROMPT')).decode('utf-8') 
+            tasks = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_TASKS')).decode('utf-8')
+            rules = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_RULES')).decode('utf-8')
+            close_prompt = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_CLOSE_PROMPT')).decode('utf-8')
+#            response = _summarize_issue(issue, prompt,rules, tasks)
+            response = """Blocker:True
 
-    if not issues:
+@Business Analyst @Solution Architect
+
+* **Critical Flaw:**  Accepting invalid/expired tokens as a success (200) violates standard security practices and is a major vulnerability.  This needs immediate correction.
+
+* **Missing Error Handling:** The 500 response lacks specific error details hindering debugging and resolution.  More informative error messages are crucial.
+
+* **Rate Limiting:**  The 429 response mentions IP blocking but doesn't specify duration or retry mechanisms. Clear documentation is needed."""
+            if not response:
+                return
+            print(f"Response for issue {issue['key']}:\n{response}\n")
+            if response.startswith("Blocker:True") or response.startswith("Blocker: True"):
+                 transition_issue(issue["key"], "4")  # Transition to "Blocked" status
+            post_comment_to_jira(issue["key"],  f"{os.getenv('TEST_CASE_REFINEMENT_TAG')}\nHi \n{response}")
+            return response
+
+###After that write Test Cases in gherkins, use this as example:
+###{feature_examples}
+###Add @JREQ-<issue_key> to each test case, where <issue_key> is the key of the issue you are working on.
+
+
+def _summarize_issue(i: dict, prompt_intro: str,rules: str, tasks: str) -> str:
+
+    if not i:
         return "No se encontraron tareas en este estado."
     ACCEPTANCE_CRITERIA_FIELD_ID = get_acceptance_criteria_field_id()
-    issue_list = "\n\n".join(
-        f"- {i['key']}: {i['fields']['summary']}\n"
-        f"  Description:\n{extract_text_from_adf(i['fields'].get('description'))}\n"
-        f"  Acceptance Criteria:\n{extract_text_from_adf(i['fields'].get(ACCEPTANCE_CRITERIA_FIELD_ID))}\n"
-        + (
-            (lambda parent: (
-                f"\n  Parent US: {parent['key']} {parent['fields'].get('summary', '')}\n"
-                f"  Parent description: {extract_text_from_adf(parent['fields'].get('description'))}\n"
-                f"  Acceptance Criteria:\n{extract_text_from_adf(parent['fields'].get(ACCEPTANCE_CRITERIA_FIELD_ID))}\n"
-            ))(fetch_issue_by_key(i['fields']['parent']['key']))
-            if i['fields'].get("parent") else ""
-        )
-        for i in issues
-    )
+    issue_as_txt = f"###US - {i['key']}: {i['fields']['summary']} ###\nDescription:\n{extract_text_from_adf(i['fields'].get('description'))}\nAcceptance Criteria:\n{extract_text_from_adf(i['fields'].get(ACCEPTANCE_CRITERIA_FIELD_ID))}\n### END US ###\n"
+#        + (
+#            (lambda parent: (
+#                f"\n  Parent US: {parent['key']} {parent['fields'].get('summary', '')}\n"
+#                f"  Parent description: {extract_text_from_adf(parent['fields'].get('description'))}\n"
+#                f"  Acceptance Criteria:\n{extract_text_from_adf(parent['fields'].get(ACCEPTANCE_CRITERIA_FIELD_ID))}\n"
+#            ))(fetch_issue_by_key(i['fields']['parent']['key']))
+#            if i['fields'].get("parent") else ""
+#        )
+        
+    
 
-    full_prompt = f"{prompt_intro}\n{issue_list}"
-#    print(full_prompt)
+    full_prompt = f"{prompt_intro}\n{issue_as_txt}"
+    full_prompt += f"{rules}\n"
+    full_prompt += f"{tasks}\n"
 
-    return generate(full_prompt)
+    print(full_prompt)
+    response = ""
+    response = generate(full_prompt)
+
+    return response
