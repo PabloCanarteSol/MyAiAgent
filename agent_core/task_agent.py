@@ -83,16 +83,7 @@ def summarize_test_case_refinement_tasks(user_email: str = None):
             tasks = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_TASKS')).decode('utf-8')
             rules = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_RULES')).decode('utf-8')
             close_prompt = base64.b64decode(os.getenv('TEST_CASE_REFINEMENT_CLOSE_PROMPT')).decode('utf-8')
-#            response = _summarize_issue(issue, prompt,rules, tasks)
-            response = """Blocker:True
-
-@Business Analyst @Solution Architect
-
-* **Critical Flaw:**  Accepting invalid/expired tokens as a success (200) violates standard security practices and is a major vulnerability.  This needs immediate correction.
-
-* **Missing Error Handling:** The 500 response lacks specific error details hindering debugging and resolution.  More informative error messages are crucial.
-
-* **Rate Limiting:**  The 429 response mentions IP blocking but doesn't specify duration or retry mechanisms. Clear documentation is needed."""
+            response = _summarize_issue(issue, prompt,rules, tasks)
             if not response:
                 return
             print(f"Response for issue {issue['key']}:\n{response}\n")
