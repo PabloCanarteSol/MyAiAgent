@@ -1,4 +1,4 @@
-from agent_core.jira_client import get_field_last_update, get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id,get_comments_after, transition_issue, post_comment_to_jira 
+from agent_core.jira_client import get_field_last_update, get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id,get_comments_after, transition_issue, post_comment_to_jira , get_last_comment
 from agent_core.llm_selector import generate
 import base64
 import os
@@ -50,7 +50,8 @@ def has_already_commented(comments, tag):
         if extract_text_from_adf(c['body']).startswith(tag):
 ##            print(f"\nAlready commented with tag '{tag}':\n {extract_text_from_adf(c['body'])}\n\n")
             return True
- 
+    return False
+
 def load_feature_files_as_examples(folder_path: str) -> str:
     examples = []
     for filename in os.listdir(folder_path):
@@ -91,10 +92,28 @@ def summarize_test_case_refinement_tasks(user_email: str = None):
                  transition_issue(issue["key"], "4")  # Transition to "Blocked" status
             post_comment_to_jira(issue["key"],  f"{os.getenv('TEST_CASE_REFINEMENT_TAG')}\nHi \n{response}")
             return response
+        elif extract_text_from_adf(get_last_comment(issue["key"])['body'])=="QaSimMode write test cases":
+            prompt=f"You are a QA Engineer, you have to write test cases in gherkins for the following issue:\n"
+            tasks=f"write Test Cases in gherkins, use this as example: \n{feature_examples}\n"
+            rules="Add @JREQ-<issue_key> to each test case, where <issue_key> is the key of the issue you are working on.\n If the happy path is "
+            response = _summarize_issue(issue, prompt,rules, tasks)
 
-###After that write Test Cases in gherkins, use this as example:
-###{feature_examples}
-###Add @JREQ-<issue_key> to each test case, where <issue_key> is the key of the issue you are working on.
+            post_comment_to_jira(issue["key"],  f"Please Check the Test Cases, they are ready to be reviewed\n{response}\n")
+            return "Make a comment"
+        
+        elif extract_text_from_adf(get_last_comment(issue["key"])['body']).startswith("QaSimMode"):
+            post_comment_to_jira(issue["key"],  f"I'dont understand the last comment, please clarify what you want me to do")
+            return "Make a comment"
+
+        
+        else:
+            return extract_text_from_adf(get_last_comment(issue["key"])['body'])
+
+#        elif extract_text_from_adf(get_last_comment(issue["key"])['body']).startswith("QaSimMode, write test cases"):
+#            post_comment_to_jira(issue["key"],  f"I'm working on it")
+#            
+
+
 
 
 def _summarize_issue(i: dict, prompt_intro: str,rules: str, tasks: str) -> str:
@@ -120,6 +139,9 @@ def _summarize_issue(i: dict, prompt_intro: str,rules: str, tasks: str) -> str:
 
     print(full_prompt)
     response = ""
+
     response = generate(full_prompt)
 
     return response
+
+

@@ -65,6 +65,13 @@ def get_comments_after(issue_key, after_date: datetime | None = None):
                 result.append(comment)
     return result
 
+def get_last_comment(issue_key: str) -> dict | None:
+    comments = get_comments_after(issue_key)
+    if comments:
+        return comments[-1]  # Return the most recent comment
+    return None
+
+
 def get_last_updated_user(issue):
     # Usa author del último comentario o editor del issue
     try:
