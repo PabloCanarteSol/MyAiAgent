@@ -1,8 +1,6 @@
 import os
 import requests
 from requests.auth import HTTPBasicAuth
-import dateutil.parser
-from datetime import datetime
 
 CONFLUENCE_URL = os.getenv("JIRA_BASE_URL")+ "/wiki"
 CONFLUENCE_SPACE = os.getenv("CONFLUENCE_SPACE")
