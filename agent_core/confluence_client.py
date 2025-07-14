@@ -1,6 +1,8 @@
 import os
 import requests
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
+load_dotenv()
 
 CONFLUENCE_URL = os.getenv("JIRA_BASE_URL")+ "/wiki"
 CONFLUENCE_SPACE = os.getenv("CONFLUENCE_SPACE")
