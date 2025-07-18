@@ -98,6 +98,18 @@ def get_field_last_update(issue_key: str, field_name: str) -> datetime | None:
     latest = max(changes, key=lambda h: h["created"])
     return datetime.strptime(latest["created"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
+def fetch_transitions_for_issue(issue_key: str) -> list:
+    url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/transitions"
+    response = requests.get(url, headers=headers, auth=auth)
+    response.raise_for_status()
+    return response.json().get("transitions", [])
+
+def get_transition_id_by_target_status(transitions: list, target_status_name: str) -> str | None:
+    for transition in transitions:
+        if transition["to"]["name"].lower() == target_status_name.lower():
+            return transition["id"]
+    return None
+
 def transition_issue(issue_key: str, transition_id: str):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/transitions"
     payload = {
@@ -155,3 +167,36 @@ def post_comment_to_jira(issue_key: str, message: str):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/comment"
     response = requests.post(url, headers=headers, auth=auth, json=comment_body)
     response.raise_for_status()
+
+def get_blocked_issues_with_done_dependencies():
+    jql = 'status IN ("BLOCKED", "BLOCKED QA", "BLOCKED SCOPING") AND issueLinkType = "is blocked by"'
+    issues = fetch_issues_by_jql(jql)
+
+
+    in_valid_issues = []
+    for issue in issues:
+        links = issue['fields'].get('issuelinks', [])
+        for link in links:
+            if link.get('type', {}).get('name') == 'Blocks' and 'inwardIssue' in link:
+                blocked_by = link['inwardIssue']
+                blocked_by_key = blocked_by['key']
+                related_issue = fetch_issue_by_key(blocked_by_key)
+                related_status = related_issue['fields']['status']['name']
+                if related_status not in ['DONE', 'UAT','Done']:
+                    in_valid_issues.append(issue)
+                    break  # Solo necesitas una relación cumplida
+    valid_issues=[i for i in in_valid_issues + issues if (i in in_valid_issues) != (i in issues)]
+    for i in in_valid_issues:
+        print(f"Issue {i['key']} is blocked by an issue with status {related_status}")
+    return valid_issues
+
+def fetch_issues_by_jql(jql, max_results=50):
+    url = f"{JIRA_URL}/rest/api/3/search"
+    params = {
+        "jql": jql,
+        "maxResults": max_results,
+        "fields": "summary,status,description,issuelinks"
+    }
+    response = requests.get(url, headers=headers, auth=auth, params=params)
+    response.raise_for_status()
+    return response.json().get("issues", [])

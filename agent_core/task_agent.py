@@ -1,4 +1,4 @@
-from agent_core.jira_client import get_field_last_update, get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id,get_comments_after, transition_issue, post_comment_to_jira , get_last_comment
+from agent_core.jira_client import fetch_transitions_for_issue, get_blocked_issues_with_done_dependencies, get_field_last_update, get_issues_by_status, fetch_issue_by_key, get_acceptance_criteria_field_id,get_comments_after, get_transition_id_by_target_status, transition_issue, post_comment_to_jira , get_last_comment
 from agent_core.llm_selector import generate
 import base64
 import os
@@ -64,15 +64,22 @@ def load_feature_files_as_examples(folder_path: str) -> str:
 
 def summarize_ready_for_qa_tasks(user_email: str = None):
     issues = get_issues_by_status("Ready for QA", assignee=user_email)
-    return _summarize_issues(issues, "for each issue, check it make sense, no errors, and it's really understandable")
+    if not issues:
+        return "No hay tareas en estado 'Ready for QA'."
+    for issue in issues:
+        _summarize_issue(issue, "for each issue, check it make sense, no errors, and it's really understandable")
 
 def summarize_test_case_refinement_tasks(user_email: str = None):
-    feature_examples = load_feature_files_as_examples("features/")
+    feature_BE_examples = load_feature_files_as_examples("features_BE/")
+    feature_APP_examples = load_feature_files_as_examples("features_APP/")
 #    issues = get_issues_by_status("REFINEMENT", assignee=user_email)
     issues = get_issues_by_status("TEST CASE REFINEMENT", assignee=user_email)
 #    issues = get_issues_by_status("REQUIREMENTS REVIEW", assignee=user_email)
     for issue in issues:
-
+        if (issue['fields']['summary'].startswith("APP")):
+                feature_examples = feature_APP_examples
+        elif (issue['fields']['summary'].startswith("BE")):
+                feature_examples = feature_BE_examples
 
         last_description_change = get_field_last_update(issue["key"], "description")
         last_ac_change = get_field_last_update(issue["key"], "Acceptance Criteria")
@@ -93,6 +100,8 @@ def summarize_test_case_refinement_tasks(user_email: str = None):
             post_comment_to_jira(issue["key"],  f"{os.getenv('TEST_CASE_REFINEMENT_TAG')}\nHi \n{response}")
             return response
         elif extract_text_from_adf(get_last_comment(issue["key"])['body'])=="QaSimMode write test cases":
+
+
             prompt=f"You are a QA Engineer, you have to write test cases in gherkins for the following issue:\n"
             tasks=f"write Test Cases in gherkins, use this as example: \n{feature_examples}\n"
             rules="Add @JREQ-<issue_key> to each test case, where <issue_key> is the key of the issue you are working on.\n If the happy path is "
@@ -145,3 +154,15 @@ def _summarize_issue(i: dict, prompt_intro: str,rules: str, tasks: str) -> str:
     return response
 
 
+def summarize_blocked_tasks_with_done_dependencies():
+    issues = get_blocked_issues_with_done_dependencies()
+    if not issues:
+        return "No hay tareas bloqueadas con dependencias completadas."
+    for i in issues:    
+        print(f"Blocked issue {i['key']} with done dependencies: {i['fields']['summary']}")
+        transition_id=get_transition_id_by_target_status(fetch_transitions_for_issue(i['key']), "READY FOR DEV")
+        if transition_id:
+            transition_issue(i['key'], transition_id)
+            print(f"Issue {i['key']} transitioned to 'READY FOR DEV'.")
+        else:
+            print(f"No transition available for issue {i['key']} to 'READY FOR DEV'.")
